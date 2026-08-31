@@ -1,0 +1,22 @@
+{
+  "model": "RT-DETR-L",
+  "training_labels": "raw radiologist boxes, no fusion",
+  "imgsz": 640,
+  "max_epochs": 220,
+  "patience": 30,
+  "batch_fraction": 0.75,
+  "workers": 8,
+  "deterministic": false,
+  "test_prediction_floor": 0.02,
+  "test_iou": 0.4,
+  "threshold_candidates": [
+    0.03,
+    0.05,
+    0.075,
+    0.1,
+    0.15,
+    0.2,
+    0.25
+  ],
+  "best_pt": "/scratch/xiaolil02/amia_2026_work/v6_rtdetr_raw640/runs/rtdetr_l_raw640/weights/best.pt"
+}

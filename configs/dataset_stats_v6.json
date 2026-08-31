@@ -1,0 +1,7 @@
+{
+  "train_images": 7287,
+  "val_images": 1286,
+  "raw_abnormal_rows": 30400,
+  "normal_images": 5175,
+  "imgsz": 640
+}
