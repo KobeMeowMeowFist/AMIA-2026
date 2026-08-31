@@ -1,0 +1,8 @@
+ultralytics==8.4.129
+kaggle>=1.8.0
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+scikit-learn>=1.4
+Pillow>=10
+tqdm>=4.66
