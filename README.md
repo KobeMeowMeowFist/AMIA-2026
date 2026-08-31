@@ -1,182 +1,124 @@
-# AMIA Public Challenge 2026 — Curta/SLURM GPU Version
+# AMIA 2026 Chest X-ray Abnormality Detection
 
-This version is adapted to the known-working SLURM pattern supplied for the school cluster. SLURM owns the training process; there is no Kaggle/Jupyter background `Popen` layer.
+Course project for multi-class abnormality detection on chest X-rays using **RT-DETR-L**.
 
-## Cluster request used by this project
+The final pipeline uses the original radiologist bounding-box annotations without custom box fusion. The 8,573 labeled training images are split at the image level into 7,287 training and 1,286 validation images. RT-DETR-L is trained with 640×640 inputs and evaluated with standard detection metrics. Test predictions are filtered by confidence and mapped back to the original image coordinates.
 
-The main job follows this resource profile:
-
-```bash
-#SBATCH --partition=scavenger
-#SBATCH --gres=gpu:1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=24:00:00
-#SBATCH --qos=standard
-```
-
-The job checks the allocated card at runtime and accepts **H100 or A5000 only**. It exits immediately if a different GPU is assigned.
-
-The Python pipeline deliberately uses **one GPU (`cuda:0`)** for YOLO, Faster R-CNN, and DenseNet. It will not auto-enable Ultralytics multi-GPU DDP even if the node exposes additional devices.
-
-## Files
+## Repository structure
 
 ```text
-amia_slurm_pipeline.py     full training/evaluation pipeline
-run_curta_gpu.sbatch       recommended full job; accepts H100 or A5000
-run_h100.sbatch            full job that requires an H100 at runtime
-run_a5000.sbatch           full job using the known A5000 GRES spelling
-run_smoke_test.sbatch      one-epoch end-to-end test
-download_kaggle_data.sh    Kaggle competition downloader
-prepare_pretrained_weights.py
-monitor.sh
-requirements.txt
+.
+├── README.md
+├── requirements.txt
+├── src/
+│   └── amia_v6_rtdetr_raw_h100.py
+├── scripts/
+│   └── run_v6_rtdetr_h100.sbatch
+├── configs/
+│   ├── args.yaml
+│   ├── experiment_v6.json
+│   └── dataset_stats_v6.json
+└── results/
+    └── results.csv
 ```
 
-## 1. Put the project on the server
+## Final configuration
 
-```bash
-unzip amia_slurm_project_curta.zip
-cd amia_slurm_project_curta
+- Model: RT-DETR-L
+- Input size: 640×640
+- Training labels: raw radiologist boxes, no custom fusion
+- Train / validation split: 7,287 / 1,286 images
+- Maximum epochs: 220
+- Early-stopping patience: 30
+- Batch: Ultralytics AutoBatch, target 75% GPU memory
+- Optimizer: auto
+- Learning-rate schedule: cosine
+- AMP: enabled
+- Workers: 8
+- Seed: 42
+- Final confidence threshold: 0.10
+
+## Environment
+
+The final run used:
+
+```text
+Python 3.14.7
+PyTorch 2.13.0+cu130
+Ultralytics 8.4.129
+NVIDIA H100 80GB
 ```
 
-Keep the project code wherever you normally store repositories. Large competition data and checkpoints default to `/scratch/$USER/...`.
-
-## 2. Python environment
-
-Prefer the school's CUDA/PyTorch module or environment. Example if PyTorch is already available system-wide:
+Install the Python dependencies with:
 
 ```bash
-python -m venv --system-site-packages .venv
-source .venv/bin/activate
-python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__)"
 pip install -r requirements.txt
 ```
 
-Do not blindly replace the cluster's working PyTorch/CUDA stack.
+On the university cluster, use the existing CUDA/PyTorch environment when possible rather than replacing the system CUDA stack.
 
-## 3. Kaggle authentication and data download
+## Data
 
-First accept the competition rules on Kaggle. Configure Kaggle CLI credentials on the login node, then run:
+The dataset is based on the AMIA Public Challenge 2026 / VinDr-CXR data.
 
-```bash
-source .venv/bin/activate
-./download_kaggle_data.sh
-```
-
-Default destination:
+Expected data:
 
 ```text
-/scratch/$USER/amia-public-challenge-2026
+8,573 labeled training images
+6,427 test images
+14 abnormality classes
 ```
 
-You can override it:
+The final preprocessing keeps all abnormal annotation rows for classes 0–13. Normal images are retained with empty detection labels.
+
+Set the dataset location before running if required by the script, for example:
 
 ```bash
-./download_kaggle_data.sh /scratch/$USER/my_amia_data
-export AMIA_DATA_DIR=/scratch/$USER/my_amia_data
+export AMIA_DATA_DIR=/scratch/$USER/amia-public-challenge-2026
 ```
 
-## 4. Download pretrained weights before compute jobs
+Do not upload the image dataset to this repository.
 
-If compute nodes have no Internet:
+## Training
+
+Submit the final training job with:
 
 ```bash
-python prepare_pretrained_weights.py --weights-dir ./weights
+sbatch scripts/run_v6_rtdetr_h100.sbatch
 ```
 
-This prepares YOLOv8s, Faster R-CNN/ResNet50-FPN, and DenseNet121 pretrained weights.
+The job trains one RT-DETR-L model on a single GPU and uses early stopping. Checkpoints and intermediate outputs are stored on shared scratch storage.
 
-## 5. Smoke test
+## Inference and post-processing
 
-```bash
-sbatch run_smoke_test.sbatch
-```
-
-Then:
-
-```bash
-squeue -u $USER
-./monitor.sh JOB_ID
-```
-
-The smoke test uses one epoch per model and exists only to validate the complete path from data loading through submission/report generation.
-
-## 6. Recommended full submission
-
-Use the generic Curta job:
-
-```bash
-sbatch run_curta_gpu.sbatch
-```
-
-It requests one GPU from `scavenger`, then checks that the card is H100 or A5000. Batch sizes are selected from the actual GPU:
-
-| GPU | YOLO batch | Faster R-CNN batch | DenseNet batch |
-|---|---:|---:|---:|
-| H100 | 8 | 4 | 32 |
-| A5000 | 4 | 2 | 16 |
-
-The full experiment uses YOLO 40 epochs, Faster R-CNN 10 epochs, and DenseNet121 8 epochs.
-
-If the scheduler gives a GPU other than H100/A5000, the script exits before model training. Resubmit using your cluster's node-selection helper or a suitable `sbatch --nodelist=...` option.
-
-## 7. A5000-specific request
-
-The supplied working cluster script documents this GRES spelling for A5000, so you can explicitly request it with:
-
-```bash
-sbatch run_a5000.sbatch
-```
-
-or equivalently:
-
-```bash
-sbatch --gres=gpu:a5000:1 run_curta_gpu.sbatch
-```
-
-## 8. H100-specific request
-
-The reference cluster script intentionally avoids hardcoding an H100 node. `run_h100.sbatch` therefore uses generic `--gres=gpu:1` and verifies at runtime that the allocated GPU is H100.
-
-If your existing `find_best_gpu.sh` selects an H100 node, use it with `run_h100.sbatch` or submit with your known-valid node selector. Do not permanently hardcode a node into the project unless the cluster administrator recommends it.
-
-## 9. Work/checkpoint locations
-
-Generic job default:
+The final model produces:
 
 ```text
-/scratch/$USER/amia_2026_work/amia_cv
+class
+confidence score
+bounding box
 ```
 
-H100 profile:
+Test inference first keeps low-confidence candidates so that post-processing can be evaluated without rerunning the network. The final predictions use a confidence threshold of 0.10.
 
-```text
-/scratch/$USER/amia_2026_work/h100
-```
+Predicted boxes are converted from the source image coordinates to the original radiograph coordinates before evaluation.
 
-A5000 profile:
+## Evaluation
 
-```text
-/scratch/$USER/amia_2026_work/a5000
-```
+Validation analysis includes:
 
-All checkpoints and stage markers stay on shared `/scratch`, so SSH disconnects do not stop training. Re-submitting with the same `AMIA_WORK_DIR` allows the pipeline to reuse completed stages/checkpoints.
+- Precision
+- Recall
+- F1 score
+- mAP@0.50
+- mAP@0.50:0.95
+- normalized confusion matrix
+- qualitative comparison of ground-truth boxes and predictions
 
-## 10. Final outputs
+The challenge test-set metric is mAP at IoU 0.40.
 
-Under the selected work directory:
+## Code references
 
-```text
-amia_results/
-  report.md
-  submission.csv
-  metrics.json
-  experiment_metadata.json
-  figures/
-  tables/
-amia_report_bundle.zip
-```
+RT-DETR-L is used through the Ultralytics implementation. A public RT-DETR notebook for the same AMIA task was consulted as an implementation reference during the later experiments. The final v6 training, splitting, post-processing, checkpoint handling, and coordinate-conversion pipeline was implemented separately for this project.
 
-The pipeline performs multi-radiologist annotation fusion, YOLOv8s, Faster R-CNN + ResNet50-FPN, DenseNet121 Normal/Abnormal classification, VOC-style lesion mAP@IoU=0.40, detector fusion, classifier calibration, validation threshold tuning, test inference, plots, and report generation.
+See the report for the full experimental comparison, including the earlier YOLO, Faster R-CNN, DenseNet, and ensemble experiments.
