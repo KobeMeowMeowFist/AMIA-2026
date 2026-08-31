@@ -33,9 +33,6 @@ The final pipeline uses the original radiologist bounding-box annotations withou
 - Batch: Ultralytics AutoBatch, target 75% GPU memory
 - Optimizer: auto
 - Learning-rate schedule: cosine
-- AMP: enabled
-- Workers: 8
-- Seed: 42
 - Final confidence threshold: 0.10
 
 ## Environment
